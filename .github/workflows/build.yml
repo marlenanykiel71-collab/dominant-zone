@@ -17,15 +17,12 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: "22"
 
       - name: Install dependencies
         run: npm install
 
       - name: Build static site
-        env:
-          # Force Nitro to emit a fully static output under .output/public
-          NITRO_PRESET: static
         run: npm run build
 
       - name: Prepare deploy directory
@@ -33,14 +30,39 @@ jobs:
           set -e
           rm -rf deploy
           mkdir -p deploy
-          # Nitro static preset writes prerendered files here.
-          if [ -d ".output/public" ]; then
+          # TanStack Start prerender writes static client assets + HTML here.
+          if [ -d "dist/client" ]; then
+            cp -r dist/client/. deploy/
+          elif [ -d ".output/public" ]; then
             cp -r .output/public/. deploy/
           elif [ -d "dist" ]; then
             cp -r dist/. deploy/
           else
-            echo "No build output found (.output/public or dist)." >&2
+            echo "No build output found." >&2
             exit 1
+          fi
+          # Safety net: if prerender did not produce index.html at the root,
+          # create a minimal SPA entry that loads the built client bundle.
+          if [ ! -f "deploy/index.html" ]; then
+            echo "No prerendered index.html; generating SPA fallback." >&2
+            entry=$(ls deploy/assets/entry-client-*.js 2>/dev/null | head -n1 | sed 's|deploy/||')
+            css=$(ls deploy/assets/*.css 2>/dev/null | head -n1 | sed 's|deploy/||')
+            cat > deploy/index.html <<HTML
+<!doctype html>
+<html lang="pl">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Strefa Dominacji</title>
+    ${css:+<link rel="stylesheet" href="./$css" />}
+    <link rel="icon" href="./favicon.ico" />
+  </head>
+  <body>
+    <div id="root"></div>
+    ${entry:+<script type="module" src="./$entry"></script>}
+  </body>
+</html>
+HTML
           fi
           # Required files that must always be present at the site root.
           touch deploy/.nojekyll
