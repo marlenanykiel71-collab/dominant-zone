@@ -1,9 +1,10 @@
-name: Build Automatically
+name: Build & Deploy to GitHub Pages
 
 on:
   push:
     branches:
       - main
+  workflow_dispatch:
 
 jobs:
   build-deploy:
@@ -16,16 +17,45 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: "20"
 
       - name: Install dependencies
         run: npm install
 
-      - name: Build the project
+      - name: Build static site
+        env:
+          # Force Nitro to emit a fully static output under .output/public
+          NITRO_PRESET: static
         run: npm run build
 
-      - name: Deploy to GitHub Pages
+      - name: Prepare deploy directory
+        run: |
+          set -e
+          rm -rf deploy
+          mkdir -p deploy
+          # Nitro static preset writes prerendered files here.
+          if [ -d ".output/public" ]; then
+            cp -r .output/public/. deploy/
+          elif [ -d "dist" ]; then
+            cp -r dist/. deploy/
+          else
+            echo "No build output found (.output/public or dist)." >&2
+            exit 1
+          fi
+          # Required files that must always be present at the site root.
+          touch deploy/.nojekyll
+          for f in favicon.ico og-image.png placeholder.svg robots.txt; do
+            if [ ! -f "deploy/$f" ] && [ -f "public/$f" ]; then
+              cp "public/$f" "deploy/$f"
+            fi
+          done
+
+      - name: Deploy to gh-pages branch
         uses: peaceiris/actions-gh-pages@v3
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
-          publish_dir: ./dist
+          publish_dir: ./deploy
+          publish_branch: gh-pages
+          # Wipe the branch on every deploy so only the built output is
+          # present — no source code, no history of previous builds.
+          force_orphan: true
